@@ -27,8 +27,9 @@ Action (float32, ACT_DIM = 12): joint position targets as offsets from the defau
 scaled by ACTION_SCALE and clipped to the joint limits.
 
 Surface friction varies between instances and is NOT in the observation. Adapting to a surface
-you cannot see is the point (env/course.py). The instance suite is FIXED, not drawn from the
-round seed — see `instance_spec` for why.
+you cannot see is the point (env/course.py). The COURSE is drawn from the platform's per-round
+seed, so its layout is not knowable before the round opens; the instance suite within a round is a
+fixed, stratified friction sweep over that one course — see `instance_spec`.
 
 Termination gates (each maps to a terminal_reason the miner sees post-round):
     completed       pelvis past the finish line
@@ -46,8 +47,8 @@ from dataclasses import dataclass
 import mujoco
 import numpy as np
 
-from .course import (COURSE_LENGTH, GEOM_PREFIX, PLINTH_TOP, SEGMENTS, TRACK_HALF_W, WORLD_GROUP,
-                     course_xml_fragment, sample_frictions)
+from .course import (GEOM_PREFIX, PLINTH_TOP, TRACK_HALF_W, WORLD_GROUP, Course,
+                     course_xml_fragment, generate_course, sample_frictions)
 
 ASSETS = pathlib.Path(__file__).parent / "assets"
 
@@ -100,7 +101,7 @@ class StepResult:
     terminal_reason: str | None  # None while the episode is still running
 
 
-def _scene_xml(frictions: list[float] | None) -> str:
+def _scene_xml(course: Course, frictions: list[float] | None) -> str:
     """The robot model with the course spliced into its worldbody."""
     robot = (ASSETS / "g1_12dof.xml").read_text()
     floor = (f'    <geom name="floor" type="plane" size="80 20 0.1" pos="30 0 0" '
@@ -108,59 +109,72 @@ def _scene_xml(frictions: list[float] | None) -> str:
     start = (f'    <geom type="box" pos="{START_X - 0.7:.3f} 0 {PLINTH_TOP - 0.2:.3f}" '
              f'size="1.5 {TRACK_HALF_W} 0.2" condim="3" group="{WORLD_GROUP}" '
              f'friction="1 .1 .1" rgba=".45 .47 .5 1"/>\n')
-    body = floor + start + course_xml_fragment(SEGMENTS, frictions)
+    body = floor + start + course_xml_fragment(course.segs, frictions)
     return robot.replace("</worldbody>", body + "\n  </worldbody>")
 
 
 def instance_spec(i: int, n: int) -> tuple[float, int]:
-    """The (friction level, seed) of evaluation instance `i` of `n`.
+    """The (friction level, instance seed) of evaluation instance `i` of `n`.
 
-    Deliberately a pure function of (i, n) and NOTHING else — in particular not the platform's
-    per-round seed. The course is static and public, so a per-round seed would buy no secrecy;
-    all it would buy is score noise, and score noise is exactly what sets the takeover margin.
-    Measured per-instance stdev is ~0.019, so randomising the suite each round would need ~1400
-    instances to resolve a 1% improvement, which does not fit the referee's time budget. A fixed
-    suite makes a given policy score the SAME every round: round-to-round variance is zero and
-    1% takeover is decided purely by skill.
+    A pure function of (i, n): within a round, the COURSE carries the per-round randomness (it is
+    drawn from the platform's master seed in `env.course.generate_course`) and the instance suite
+    sweeps friction across that course. Keeping the sweep deterministic means every submission in
+    the round runs exactly the same instances, so identical resubmissions score identically.
 
     Coverage comes from stratification instead of randomness. Levels are spread evenly across
-    the friction range, so 24 instances sample the whole grippy->slippery continuum rather than
+    the friction range, so N instances sample the whole grippy->slippery continuum rather than
     clustering wherever a draw happened to land.
+
+    Note what this does NOT fix. With one course per round, round-to-round score variance is a
+    single course draw and is therefore large: the v0.2.0 design measured sigma_round = 0.0304
+    against a 1% takeover margin (17x too noisy, `variance_baseline_N120_image.json`). Averaging
+    several courses per round is the lever that shrinks it, at the cost of one model compile each.
     """
     return (i + 0.5) / n, i
 
 
 _MODEL: mujoco.MjModel | None = None
+_MODEL_KEY: tuple | None = None
 _COURSE_GEOMS: list[int] = []
 
 
-def _shared_model() -> tuple[mujoco.MjModel, list[int]]:
-    """Compile the scene once and reuse it for every instance.
+def _course_model(course: Course) -> tuple[mujoco.MjModel, list[int]]:
+    """Compile the scene once per course and reuse it for every instance on that course.
 
     Compiling costs ~1.1 s and a few hundred MB, because the G1's collision geometry is 27 STL
-    meshes that MuJoCo converts to convex hulls. Doing that per instance was ~26 s of a 67 s
-    evaluation and pushed the referee to 1.1 GB against a 1.5 GiB limit.
+    meshes that MuJoCo converts to convex hulls. Doing it per instance was ~26 s of a 67 s
+    evaluation and pushed the referee to 1.1 GB against a 1.5 GiB limit — so the cache is what keeps
+    per-round generation affordable: one course per round means one compile per round.
 
-    Nothing instance-specific is baked into the model any more: friction is the only thing that
-    varies, and `geom_friction` is a runtime field, so it is written per instance in __init__.
-    Instances run strictly sequentially and each gets a fresh MjData, so sharing the model is
-    safe. Verified bit-identical to per-instance compilation.
+    Nothing instance-specific is baked into the model: friction is the only thing that varies within
+    a round, and `geom_friction` is a runtime field, so it is written per instance in __init__.
+    Instances run strictly sequentially and each gets a fresh MjData, so sharing the model is safe.
+
+    If this ever needs to hold SEVERAL courses per round, do NOT mutate geometry on a model compiled
+    for a different course: `geom_pos`/`geom_size` are runtime fields, but MuJoCo derives the
+    broadphase BVH (`bvh_aabb`, `bvh_nodeid`) at compile time, and a stale BVH silently DROPS
+    contacts while the height scan still reads the new geometry perfectly. Measured: max |dqpos|
+    0.81 against a fresh compile. The safe form is to compile with an envelope that encloses every
+    geometry the generator can emit and only move/shrink within it (tools/spikes/).
     """
-    global _MODEL
-    if _MODEL is None:
-        _MODEL = mujoco.MjModel.from_xml_string(_scene_xml(None), _mesh_assets())
+    global _MODEL, _MODEL_KEY
+    key = (course.seed, course.digest)
+    if _MODEL is None or _MODEL_KEY != key:
+        _MODEL = mujoco.MjModel.from_xml_string(_scene_xml(course, None), _mesh_assets())
         _MODEL.opt.timestep = PHYS_DT
-        n = sum(len(s.boxes) for s in SEGMENTS)
-        _COURSE_GEOMS.extend(_MODEL.geom(f"{GEOM_PREFIX}{i}").id for i in range(n))
+        _MODEL_KEY = key
+        _COURSE_GEOMS.clear()
+        _COURSE_GEOMS.extend(_MODEL.geom(f"{GEOM_PREFIX}{i}").id for i in range(course.n_geoms))
     return _MODEL, _COURSE_GEOMS
 
 
 class ParkourSim:
-    def __init__(self, level: float = 0.5, seed: int = 0):
+    def __init__(self, course: Course, level: float = 0.5, seed: int = 0):
         rng = np.random.default_rng([seed, 0xC0FFEE])
-        self.frictions = sample_frictions(SEGMENTS, level, rng)
+        self.course = course
+        self.frictions = sample_frictions(course.segs, level, rng)
         self.level = float(level)
-        self.model, geoms = _shared_model()
+        self.model, geoms = _course_model(course)
         # Sliding friction only; the model's rolling/torsional values stay as authored.
         for gid, mu in zip(geoms, self.frictions):
             self.model.geom_friction[gid, 0] = mu
@@ -210,7 +224,7 @@ class ParkourSim:
     @property
     def progress(self) -> float:
         """Fraction of the course covered, in [0, 1]."""
-        return float(np.clip((self.max_x - START_X) / (COURSE_LENGTH - START_X), 0.0, 1.0))
+        return float(np.clip((self.max_x - START_X) / (self.course.length - START_X), 0.0, 1.0))
 
     # -- perception ------------------------------------------------------------------------
 
@@ -264,7 +278,7 @@ class ParkourSim:
             self._action,
             [np.sin(2 * np.pi * phase), np.cos(2 * np.pi * phase)],
             [np.sin(yaw), np.cos(yaw)],
-            [py, (COURSE_LENGTH - px) / 10.0, np.clip(pz - ground, -SCAN_CLIP, SCAN_CLIP)],
+            [py, (self.course.length - px) / 10.0, np.clip(pz - ground, -SCAN_CLIP, SCAN_CLIP)],
             scan,
             over,
         ]).astype(np.float32)
@@ -277,7 +291,7 @@ class ParkourSim:
             return "physics_glitch"
         if np.max(np.abs(qvel)) > QVEL_GLITCH_LIMIT:
             return "physics_glitch"
-        if qpos[0] >= COURSE_LENGTH:
+        if qpos[0] >= self.course.length:
             return "completed"
         if abs(qpos[1]) > TRACK_HALF_W:
             return "out_of_bounds"

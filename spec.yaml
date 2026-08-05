@@ -1,6 +1,6 @@
 schema: apex.competition.v1
 id: humanoid_parkour
-version: 0.3.3
+version: 0.4.0
 display_name: "Humanoid Parkour"
 kind: solo
 process_type: cpu
@@ -18,8 +18,10 @@ resources:
 # .github/workflows/release.yml). `image` is the PLAYER image (loads + serves the miner's ONNX
 # policy).
 #
-# Digests are from the v0.3.3 release run and both images verify under the cosign identity
-# below. The platform pins by digest and rejects tags.
+# !! STALE — both digests are from the v0.3.3 release run, which predates per-round course
+# generation. The referee image MUST be rebuilt and both digests re-pinned before this version is
+# registered, or the platform will run the old fixed-course referee under a new version number.
+# The platform pins by digest and rejects tags.
 image:
   ref: ghcr.io/macrocosm-os/apex-competition-humanoid-parkour-v2-player
   digest: sha256:b5552649c857a111b9d44323d1801149933587b372307288ee94f8b2d4d473d5
@@ -35,9 +37,13 @@ image:
 # It is NOT a compute limit: measured single-threaded, a 5.5M-param net runs 0.35 ms/step, so a
 # full-survival run (96,000 inferences) costs 34 s against ~640 s of slack in the referee budget.
 # Even 74 MB would fit here. The cap exists because surplus capacity buys nothing on a
-# proprioception + height-scan control problem, and because the evaluation suite is FIXED
-# (env/sim.instance_spec) — spare parameters invite memorising 24 instances instead of learning
-# to walk, and that risk scales with parameter count.
+# proprioception + height-scan control problem.
+#
+# NOTE: this cap used to be justified partly by the evaluation suite being FIXED — "spare parameters
+# invite memorising 24 instances instead of learning to walk". That argument no longer applies now
+# that the course is drawn per round (env.course.generate_course), because there is no fixed layout
+# left to memorise. The cap is retained on the first ground alone and should be revisited: a
+# generalising terrain policy plausibly wants more capacity than a memorising one.
 #
 # The architecture itself is NOT constrained; only the tensor signature is.
 submission:
@@ -55,18 +61,24 @@ input_schema:
 
 defaults:
   baseline_score: 0.0
-  # Measured IN THE REFEREE IMAGE ON NATIVE amd64 over the full 24-instance suite at this round
-  # input, with the released stock-walker baseline (baseline/baseline.onnx — see
-  # baseline/PROVENANCE.md). Exact value 0.20068353334086175.
+  # !! STALE — MUST BE RE-MEASURED BEFORE THIS VERSION SHIPS !!
   #
-  # Both qualifiers are load-bearing. A host-side measurement gives 0.2006 and an arm64 build of
-  # this same image gives 0.2004 — spreads of 0.04% and 0.12% against a 1% takeover margin. It is
-  # measured by .github/workflows/measure-baseline.yml on a native amd64 runner, because published
-  # images are amd64-only and under qemu a 24-instance suite does not finish in 15 hours.
+  # 0.2007 was measured against the FIXED course, which no longer exists: the course is now drawn
+  # from the round's master seed (env.course.generate_course), so a given policy's score varies with
+  # the round. Host-side spot checks of the stock-walker baseline at n=3 came out 0.1852 (seed 0) and
+  # 0.1827 (seed 1) — not comparable to the figure below, but enough to show it has moved.
   #
-  # The evaluation suite is FIXED, not seeded per round (env/sim.instance_spec), so a given
-  # policy reproduces this number exactly every round: round-to-round variance is zero and 1%
-  # takeover is decided by skill rather than by noise.
+  # Re-measure as the MEAN over >= 20 round seeds, and record the spread, because this number is now
+  # a random variable rather than a constant. It is also the fallback score-to-beat when a round's
+  # score chain starts empty, so a figure measured on one lucky draw biases takeover for everyone.
+  # Still measure IN THE REFEREE IMAGE ON NATIVE amd64 (.github/workflows/measure-baseline.yml): a
+  # host-side measurement and an arm64 build of this same image disagree by 0.04% and 0.12%, against
+  # a 1% takeover margin.
+  #
+  # Expect round-to-round variance to be the dominant sizing problem, not architecture spread. The
+  # earlier v0.2.0 design — also per-round-seeded courses — measured sigma_round = 0.0304 at N=120
+  # against a 1% margin, i.e. 17x too noisy (variance_baseline_N120_image.json at tag v0.2.0). With
+  # ONE course per round that gets worse, not better, because the round's score is a single draw.
   baseline_raw_score: 0.2007
   round_length_in_days: 2
   submission_reveal_days: 5      # trained policies carry real R&D; protect them
@@ -91,7 +103,10 @@ entrypoints:
       protocol: gym_v1
 
 # The scorer sandbox: MuJoCo physics, the G1 model, the course, termination gates, scoring.
-# No generate_round entrypoint: the suite is a pure function of the round input.
+# NO generate_round entrypoint, deliberately, and it must stay that way: the referee derives the
+# whole suite from the per-round SEED, so there is nothing to run. Declaring one would make the
+# platform's spec round generation RAISE (apex-mvp _prepare_spec_next_round -> "not implemented
+# yet (APEX-101)"), which would stop rounds rolling entirely.
 referee:
   protocol: gym_v1
   image:
