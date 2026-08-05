@@ -28,8 +28,16 @@ Alignment checks, to run against top submissions each round:
    (`tools/make_baseline.py`) and never sees the scan, against **-0.1287** for a scan-reading policy.
    Sign is not meaningful — that policy scored *better* on mismatched terrain. Magnitude is.
 
-   Non-ranking: it does not touch `raw_scores`. Tune with `ablation_instances` (0 disables) and
-   `ablation_offset_m` in the round input.
+   The 24 m offset is measured, not chosen by taste. A decoy fails either by matching the real
+   profile (reports nothing) or by saturating the scan more than the real profile does (then it is
+   as obvious as zeros). Over 64 positions along the course: 24 m gives min |Δ| 0.150 m, median
+   0.950 m, never degenerate, and 15.5% mean saturation against the real profile's own 11.9%. An
+   earlier +12 m failed both ways — identical flat 0.8 m ground across the whole 0-6 m start
+   region, where every current policy actually is, and it ran off the far end past ~39 m into the
+   distant floor. `env/sim._obs` wraps the decoy inside the course to prevent the latter.
+
+   Non-ranking: it does not touch `raw_scores`, and the ablation steps are not counted in `steps`.
+   Tune with `ablation_instances` (0 disables) and `ablation_offset_m` in the round input.
 2. **Does it generalise off-suite?** Score it on friction levels between the 24 evaluated ones, and
    on a mirrored or re-ordered course. Real locomotion transfers; a memorised one does not.
 3. **Does it look like locomotion?** Watch the playback (`tools/preview.py --run`). Gait should be

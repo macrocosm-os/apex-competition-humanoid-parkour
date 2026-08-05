@@ -31,25 +31,9 @@ DEFAULT_NUM_INSTANCES = 24
 DEFAULT_MAX_STEPS = 4000
 DEFAULT_DEADLINE_MS = 500
 
-# Perception ablation (non-ranking diagnostic). 4 of 24 instances is ~17% more eval time --
-# worst case ~43 s on top of ~258 s, against the 900 s referee timeout. Both are round-input
-# overridable so the cost can be turned down without rebuilding the image; ablation_instances: 0
-# disables it entirely.
+# Perception ablation, non-ranking. Both are round-input overridable; 0 instances disables.
+# Offset chosen by measurement -- see HANDOFF.md alignment check 1.
 DEFAULT_ABLATION_INSTANCES = 4
-# 24 m, chosen by measurement over 64 positions along the course, not by taste. The two failure
-# modes for a decoy offset are being IDENTICAL to the real profile (then the check reports nothing)
-# and saturating the scan at +/-SCAN_CLIP more than the real profile does (then it is as
-# recognisable as a block of zeros, and a replay policy can fake a delta by falling over on cue).
-#
-# +12 m failed both: the decoy is flat 0.8 m ground exactly where the real course is flat 0.8 m
-# ground, so max |delta| was 0.000 across the whole 0-6 m start region -- the part of the course
-# every current policy actually occupies. It also ran off the far end past ~39 m, saturating the
-# whole scan against the distant floor.
-#
-# At 24 m (with wrap-around, see env/sim._obs): min |delta| 0.150 m and median 0.950 m over those
-# 64 positions, never degenerate, and mean saturation 15.5% against the real profile's own 11.9%
-# -- a 3.5 point gap, so it does not stand out. 28 m gives a larger min delta (0.400) but a 7.6
-# point saturation gap, which is the worse trade for a check whose value is being inconspicuous.
 DEFAULT_ABLATION_OFFSET_M = 24.0
 
 # Everything a broken player can throw at us, all of it the SUBMISSION's fault.
@@ -71,9 +55,7 @@ class ParkourReferee(Referee):
     def _run_instance(self, ctx, player, i, n, max_steps, deadline_ms, terrain_offset=0.0):
         """Drive one instance to termination. Returns (sim, terminal_reason).
 
-        `terrain_offset` runs it as a perception ablation (env/sim.ParkourSim) — same physics, but
-        the policy is shown the terrain from further along the course.
-        """
+        A non-zero `terrain_offset` runs it as a perception ablation (env/sim.ParkourSim)."""
         level, seed = instance_spec(i, n)
         sim = ParkourSim(level, seed, terrain_offset=terrain_offset)
         obs = sim.reset(seed)
@@ -81,8 +63,6 @@ class ParkourReferee(Referee):
         # level is the one thing a policy is supposed to have to FEEL rather than read, so
         # it must not leak through reset() — hence seed=0 and an empty config. The ONNX
         # wrapper discards both today, but the leak must not be one player-image edit away.
-        # The ablation tag is in match_id only so our own logs are readable; a submission that
-        # keyed off it would be reading a string it is not given.
         tag = f"{ctx.match_id}:{i}{'a' if terrain_offset else ''}"
         player.reset(match_id=tag, player_index=0, seed=0, config={})
 
@@ -140,14 +120,8 @@ class ParkourReferee(Referee):
         completed = sum(c["terminal_reason"] == "completed" for c in instances)
         raw = total / len(instances)
 
-        # PERCEPTION ABLATION, non-ranking. Re-run the first `n_ablate` instances showing the
-        # policy terrain from `offset` metres further along the course, and report the paired
-        # difference. A policy that reads the height scan is misled and scores worse; one replaying
-        # a memorised trajectory is unaffected, so delta ~= 0 is the tell. Paired against the SAME
-        # instances so the difference is clean.
-        #
-        # This does not touch raw_scores. It is a diagnostic for the alignment checks in HANDOFF.md,
-        # and a false positive must never cost a miner their score.
+        # Re-run the first n_ablate instances with mismatched terrain and report the paired
+        # difference. Does not touch raw_scores -- a false positive must not cost a miner.
         ablation = None
         if n_ablate > 0 and offset != 0.0:
             abl = []
@@ -168,11 +142,8 @@ class ParkourReferee(Referee):
                 "score_normal": round(base_mean, 4),
                 "score_ablated": round(abl_mean, 4),
                 "delta": round(base_mean - abl_mean, 4),
+                # Magnitude is the signal, not sign: a wrong profile perturbs either way.
                 "abs_delta": round(abs(base_mean - abl_mean), 4),
-                # MAGNITUDE is the signal, not sign. A policy that reads the scan is perturbed by a
-                # wrong one either way: measured -0.1287 for a scan-reading policy that happened to
-                # do BETTER on mismatched terrain, and exactly 0.0000 for the released baseline,
-                # which slices obs to indices 0-49 (tools/make_baseline.py) and never sees the scan.
                 "note": ("abs_delta near zero means the policy is not reading the height scan; "
                          "sign only says whether real terrain helped (+) or hurt (-) this policy"),
             }
