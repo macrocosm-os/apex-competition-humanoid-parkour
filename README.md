@@ -3,7 +3,7 @@
 # Humanoid Parkour
 
 An Apex competition (Bittensor Subnet 1). Miners submit an **ONNX policy** that drives a Unitree
-G1 humanoid through a 51 m parkour course: a steep on-ramp, a sheer drop, stairs, a 1 m leap over
+G1 humanoid through a 51 m parkour course generated fresh each round: a steep on-ramp, a sheer drop, stairs, a 1 m leap over
 a real void, a hip-high hurdle, a 0.55 m step-up, a duck-under, a balance beam, a slick patch,
 and a stairway down.
 
@@ -12,12 +12,12 @@ the way and falls off the first ledge.
 
 | | |
 |---|---|
-| id / version | `humanoid_parkour` 0.3.0 |
+| id / version | `humanoid_parkour` 0.4.0 (unreleased) |
 | robot | Unitree G1, **12 actuated leg DoF only** — no arm joints, 32.1 kg |
 | submission | ONNX graph, ≤ 25 MB, architecture free |
 | interface | `obs[104]` + `state_in[256]` → `action[12]` + `state_out[256]`, float32 |
-| evaluation | 24 fixed instances, ≤ 4000 control steps each (80 s sim) |
-| baseline | 0.2007 — see [`baseline/PROVENANCE.md`](baseline/PROVENANCE.md) |
+| evaluation | 24 instances on a per-round generated course, ≤ 4000 control steps each (80 s sim) |
+| baseline | **needs re-measuring** — 0.2007 was the fixed-course figure; see `spec.yaml` |
 
 ## The robot has no arms
 
@@ -32,7 +32,7 @@ the 0.55 m step-up needs ~31-63 N.m at the knee against a **139 N.m** limit.
 
 ## The course
 
-51.1 m, linear, on a raised plinth so gaps are real voids. Difficulty ramps along its length, so
+Exactly 51.0 m every round, linear, on a raised plinth so gaps are real voids. Difficulty ramps along its length, so
 progress-based scoring gives a continuous gradient rather than discrete tiers — a policy that
 gets 3 m further scores 3 m better, all the way along.
 
@@ -48,13 +48,18 @@ gets 3 m further scores 3 m better, all the way along.
 | balance beam | 0.32 m wide, 3.5 m long |
 | slick patch | low friction, geometry identical to flat |
 
-The geometry is **static and public**. What varies between instances is surface friction, and it
-is deliberately **not observable** — a policy has to feel the slip and adapt rather than read a
-number. That is why the interface carries recurrent state.
+The obstacle *sizes* above are the top of their bands. The **generator is public but the layout is
+not**: each round's course is drawn from the platform's per-round master seed
+(`env.course.generate_course`), so its dimensions are unknown until the round opens. Every
+submission within a round runs the same course, so identical resubmissions score identically.
+
+What varies between instances *within* a round is surface friction, and it is deliberately **not
+observable** — a policy has to feel the slip and adapt rather than read a number. That is why the
+interface carries recurrent state.
 
 ```bash
-python -m env.course          # print the layout
-python tools/preview_v3.py    # stills + flythrough (needs mujoco + ffmpeg)
+python -m env.course 7                    # print the course for seed 7
+python tools/preview.py --seed 7          # stills + flythrough (needs mujoco + ffmpeg)
 ```
 
 ## Scoring
@@ -70,24 +75,31 @@ Per instance, higher is better:
 `raw_score` is the mean over the 24 instances. Any completion outranks any non-completion, faster
 completions outrank slower ones, and partial progress gives non-finishers a training gradient.
 
-## Why the evaluation suite is fixed
+## Why the course is drawn per round
 
-The 24 instances are a pure function of `(index, count)` — **not** of the platform's per-round
-seed (`env/sim.instance_spec`). This is the load-bearing design decision, so it is worth stating
-plainly.
+A fixed public course makes the whole evaluation computable offline, bit for bit. That makes
+replaying a memorised joint-target sequence the cheapest route to the top of the leaderboard — the
+opposite of the stated success criterion, which is a terrain-aware policy that reads the height scan
+and adapts. So the course is generated from the round's master seed and cannot be precomputed.
 
-The course is static and public, so a per-round seed would buy no secrecy. All it would buy is
-score noise, and score noise is what sets the takeover margin. Measured per-instance stdev is
-**0.0176**; against a 1% takeover margin of 0.002, resolving a genuine 1% improvement through a
-randomised suite would need **~1400 instances**, which does not fit the referee's 900 s budget.
+**The cost, stated plainly: score noise.** A policy's score now depends on which course the round
+drew, and round-to-round variance is what sets the takeover margin. This is measured, not
+hypothetical — the earlier v0.2.0 design also drew courses from the round seed, and measured
+`sigma_round = 0.0304` over 20 seeds against a 1% takeover margin of 0.007, i.e. **17× too noisy**
+(`variance_baseline_N120_image.json` at tag `v0.2.0`). That measurement is why the intervening
+versions used a fixed course.
 
-A fixed suite makes a given policy score identically every round. Verified: four different `SEED`
-values all produce the same score, bit for bit. Round-to-round variance is **zero**, so takeover
-is decided by skill.
+Two things follow, and neither is resolved yet:
 
-Coverage comes from stratification instead of randomness — friction levels are spread evenly
-across the range, so 24 instances sample the whole grippy-to-slippery continuum rather than
-clustering wherever a draw landed.
+- **One course per round is the noisiest possible choice**, because the round's score is a single
+  draw. Averaging several courses per round divides the variance by √k, at one model compile each.
+- **A 1% takeover margin is not viable at this noise level.** From the same v0.2.0 data, real
+  differences between training checkpoints (~0.21) are 6–16× the noise (~0.03), so genuine
+  improvements still resolve — but marginal ones do not. Expect to need a wider margin.
+
+Within a round, coverage comes from stratification rather than randomness — friction levels are
+spread evenly across the range, so the instances sample the whole grippy-to-slippery continuum
+instead of clustering wherever a draw landed (`env/sim.instance_spec`).
 
 ## Perception
 

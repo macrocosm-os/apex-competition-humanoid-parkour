@@ -1,11 +1,16 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "humanoid_parkour round input",
-  "description": "Evaluation shape for one round. The course is static and the instance suite is a fixed, stratified friction sweep built inside the referee (env/sim.instance_spec) — the round input only carries the (miner-visible, non-secret) evaluation dimensions.",
+  "description": "Evaluation shape for one round. The course is GENERATED from the round's master seed inside the referee (env.course.generate_course); the instance suite is a stratified friction sweep over that course (env/sim.instance_spec). Note the platform does not validate this schema on the spec-driven path — the scheduler skips it ('no legacy input schema to apply') and the worker passes the input to the referee verbatim — so treat it as documentation, not as a guard.",
   "type": "object",
   "additionalProperties": false,
   "required": ["num_instances", "max_steps_per_episode", "deadline_ms"],
   "properties": {
+    "seed": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Round master seed; picks the course. Written by the platform's round generator (APEX-97 mints a fresh 31-bit seed per round) and injected into the referee sandbox only, as SEED. Not miner-visible while the round is active. Optional here because the referee reads SEED from its environment; when absent the platform's _extract_base_seed yields 0, which would pin every round to the same course."
+    },
     "num_instances": {
       "type": "integer",
       "minimum": 1,

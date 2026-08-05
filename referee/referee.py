@@ -7,8 +7,15 @@ observation vectors.
 raw_score = mean instance score over all instances (see env/scoring.py). Per-instance breakdowns
 go in metadata: hidden while the round is active, revealed to miners when it completes.
 
-Note the round SEED is deliberately unused for instance generation — the course is static and
-public, and a fixed suite is what makes round-to-round variance zero. See env/sim.instance_spec.
+The course is GENERATED FROM THE ROUND SEED (`ctx.seed` -> env.course.generate_course), so its
+layout is not knowable before the round opens. Every submission in the round gets the same course,
+because the platform hands every evaluation in a round the same SEED — so identical resubmissions
+still score identically, but a trajectory optimised offline against last round's layout is worthless
+in this one.
+
+The seed and the course digest go in metadata for audit. That is safe because metadata is hidden
+while the round is active and only revealed once it completes: the generator is public
+(env/course.py), so an in-round leak of the seed would let a submission regenerate the whole layout.
 """
 
 from __future__ import annotations
@@ -22,7 +29,7 @@ from gym_v1 import GameResult, Referee, RefereeContext
 from gym_v1.client import PlayerClient, PlayerError
 from gym_v1.referee import RESULT_PATH
 
-from env import ParkourSim, instance_score, instance_spec
+from env import ParkourSim, generate_course, instance_score, instance_spec
 from env.sim import ACT_DIM, FRAME_SKIP, OBS_DIM, PHYS_DT, STATE_DIM, InvalidAction
 
 # Sized against the referee's 900 s timeout: ~2 s of physics per instance plus HTTP.
@@ -55,11 +62,16 @@ class ParkourReferee(Referee):
         deadline_ms = int(cfg.get("deadline_ms", DEFAULT_DEADLINE_MS))
         player = players[0]
 
+        # One course for the whole round, drawn from the platform's master seed. Built before the
+        # loop so a generator failure surfaces as a referee error immediately, rather than after a
+        # submission has already been part-scored.
+        course = generate_course(ctx.seed)
+
         instances = []
         total = 0.0
         for i in range(n):
             level, seed = instance_spec(i, n)
-            sim = ParkourSim(level, seed)
+            sim = ParkourSim(course, level, seed)
             obs = sim.reset(seed)
             # Nothing identifying the instance crosses into the player sandbox. The friction
             # level is the one thing a policy is supposed to have to FEEL rather than read, so
@@ -115,6 +127,14 @@ class ParkourReferee(Referee):
                 "num_completed": completed,
                 "furthest_m": max(c["distance_m"] for c in instances),
                 "eval_time_in_seconds": round(time.monotonic() - start, 1),
+                # Audit trail for the round's geometry: enough to reproduce the course exactly and
+                # to answer a dispute, revealed only once the round closes.
+                "course_seed": int(ctx.seed),
+                "course_digest": course.digest,
+                "course_length_m": round(course.length, 2),
+                "course_segments": [
+                    {"kind": s.kind, "length": round(s.length, 3)} for s in course.segs
+                ],
             },
         )
 
