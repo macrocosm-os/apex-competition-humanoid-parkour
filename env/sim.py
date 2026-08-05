@@ -156,7 +156,23 @@ def _shared_model() -> tuple[mujoco.MjModel, list[int]]:
 
 
 class ParkourSim:
-    def __init__(self, level: float = 0.5, seed: int = 0):
+    def __init__(self, level: float = 0.5, seed: int = 0, terrain_offset: float = 0.0):
+        # PERCEPTION ABLATION. Non-zero means every terrain channel (height scan, overhead
+        # clearance, ground clearance) is sampled `terrain_offset` metres further along the course
+        # than the robot actually is. The physics is untouched: the robot runs the real terrain
+        # while being shown a real profile from somewhere else.
+        #
+        # This is the diagnostic HANDOFF.md calls the most telling one — "does the submission use
+        # perception?" — but done by MISMATCH rather than by zeroing the channels. Zeros are
+        # trivially recognisable, and the check is public, so a policy replaying a memorised
+        # trajectory could detect the zeros and fall over on purpose to fake a large delta. A
+        # plausible-but-wrong profile has the right distribution and cannot be spotted that way: a
+        # policy that reads terrain is actively misled, and one that ignores it is unaffected.
+        #
+        # Pick the offset so the decoy region's deck height is comparable to the real one. If it is
+        # not, the relative scan values saturate at +/-SCAN_CLIP and the ablation becomes as
+        # obvious as a block of zeros.
+        self.terrain_offset = float(terrain_offset)
         rng = np.random.default_rng([seed, 0xC0FFEE])
         self.frictions = sample_frictions(SEGMENTS, level, rng)
         self.level = float(level)
@@ -241,18 +257,29 @@ class ParkourSim:
         ang = rot.T @ d.qvel[3:6]
         grav = rot.T @ np.array([0.0, 0.0, -1.0])
 
+        # Every terrain channel is sampled at qx, which is the robot's own x unless this instance
+        # is a perception ablation (see `terrain_offset`). Shifting the QUERY and nothing else is
+        # what keeps the physics identical while the policy's picture of the ground is wrong.
+        qx = px
+        if self.terrain_offset:
+            # Wrap inside the course. Without this the decoy runs off the far end past ~39 m and
+            # every ray reads the distant floor, saturating the whole scan at -SCAN_CLIP -- which
+            # is exactly as recognisable as a block of zeros.
+            span = COURSE_LENGTH - START_X
+            qx = START_X + (px - START_X + self.terrain_offset) % span
+
         # Height scan, in the yaw frame, expressed relative to the pelvis and clipped.
         scan = np.empty(SCAN_NX * SCAN_NY)
         k = 0
         for dx in SCAN_X:
             for dy in SCAN_Y:
-                wx, wy = px + c * dx - s * dy, py + s * dx + c * dy
+                wx, wy = qx + c * dx - s * dy, py + s * dx + c * dy
                 scan[k] = self._ray_down(wx, wy, pz + RAY_FROM_ABOVE) - pz
                 k += 1
         np.clip(scan, -SCAN_CLIP, SCAN_CLIP, out=scan)
 
-        over = np.array([self._ray_up(px + c * dx, py + s * dx, pz + 0.05) for dx in OVERHEAD_X])
-        ground = self._ray_down(px, py, pz + RAY_FROM_ABOVE)
+        over = np.array([self._ray_up(qx + c * dx, py + s * dx, pz + 0.05) for dx in OVERHEAD_X])
+        ground = self._ray_down(qx, py, pz + RAY_FROM_ABOVE)
         phase = (self.steps * PHYS_DT * FRAME_SKIP % GAIT_PERIOD) / GAIT_PERIOD
 
         return np.concatenate([

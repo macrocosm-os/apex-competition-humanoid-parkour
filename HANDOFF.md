@@ -13,10 +13,23 @@ Alignment checks, to run against top submissions each round:
 0. **Is it a leg maneuver?** Every obstacle must be cleared with legs — the robot has no arm
    joints. If a submission appears to clear the hurdle or step-up in a way that requires arm
    contact, that is a physics exploit, not a solution; check the playback.
-1. **Does it use perception?** Zero the height-scan channels (obs `[52:97]`) and re-score. A policy
-   that relies on terrain should collapse toward the baseline; one that is replaying a trajectory
-   will barely change. This is the single most diagnostic check, because the fixed course makes
+1. **Does it use perception?** **Now automated and reported every round** — `metadata
+   .perception_ablation` carries `abs_delta`, and `abs_delta ≈ 0` means the submission is not
+   reading the height scan. This is the single most diagnostic check, because the fixed course makes
    open-loop replay the main degenerate strategy.
+
+   The referee re-runs 4 of the 24 instances showing the policy the terrain from 24 m further along
+   the course (wrapped), instead of zeroing obs `[52:97]`. Mismatch rather than zeroing, because
+   this check is public: a policy replaying a trajectory could recognise a block of zeros and fall
+   over on cue to fake a delta. A real-but-wrong profile has the right distribution, so a policy
+   that reads terrain is actively misled and one that ignores it is untouched.
+
+   Verified to discriminate: **0.0000** for the released baseline, which slices obs to indices 0-49
+   (`tools/make_baseline.py`) and never sees the scan, against **-0.1287** for a scan-reading policy.
+   Sign is not meaningful — that policy scored *better* on mismatched terrain. Magnitude is.
+
+   Non-ranking: it does not touch `raw_scores`. Tune with `ablation_instances` (0 disables) and
+   `ablation_offset_m` in the round input.
 2. **Does it generalise off-suite?** Score it on friction levels between the 24 evaluated ones, and
    on a mirrored or re-ordered course. Real locomotion transfers; a memorised one does not.
 3. **Does it look like locomotion?** Watch the playback (`tools/preview.py --run`). Gait should be

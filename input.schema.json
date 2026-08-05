@@ -1,10 +1,14 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "humanoid_parkour round input",
-  "description": "Evaluation shape for one round. The course is static and the instance suite is a fixed, stratified friction sweep built inside the referee (env/sim.instance_spec) — the round input only carries the (miner-visible, non-secret) evaluation dimensions.",
+  "description": "Evaluation shape for one round. The course is static and the instance suite is a fixed, stratified friction sweep built inside the referee (env/sim.instance_spec) \u2014 the round input only carries the (miner-visible, non-secret) evaluation dimensions.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["num_instances", "max_steps_per_episode", "deadline_ms"],
+  "required": [
+    "num_instances",
+    "max_steps_per_episode",
+    "deadline_ms"
+  ],
   "properties": {
     "num_instances": {
       "type": "integer",
@@ -23,6 +27,18 @@
       "minimum": 50,
       "maximum": 5000,
       "description": "Per-/act deadline for the policy, enforced by the referee's HTTP client."
+    },
+    "ablation_instances": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 64,
+      "description": "Instances re-run as a perception ablation (non-ranking diagnostic). The policy is shown terrain from ablation_offset_m further along the course; metadata.perception_ablation.abs_delta near zero means it is not reading the height scan. 0 disables. Costs one extra instance of eval time each."
+    },
+    "ablation_offset_m": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 60,
+      "description": "Decoy displacement in metres for the perception ablation, wrapped inside the course. Chosen by measurement: 24 m is never degenerate (min |delta| 0.15 m over 64 positions) and saturates the scan only 3.5 points more than the real profile. 0 disables."
     }
   }
 }
