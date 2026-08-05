@@ -19,8 +19,8 @@ import subprocess
 import mujoco
 import numpy as np
 
-from env import ParkourSim, instance_score, instance_spec
-from env.course import COURSE_LENGTH, FINAL_DECK
+from env import ParkourSim, generate_course, instance_score, instance_spec
+
 from env.sim import OBS_DIM, PLINTH_TOP, STATE_DIM, START_X, _mesh_assets, _scene_xml
 
 OUT = pathlib.Path("renders")
@@ -43,7 +43,7 @@ def _lit_model(sim: ParkourSim) -> mujoco.MjModel:
         '<worldbody>\n'
         '    <light pos="8 -6 9" dir="-0.3 0.4 -1" directional="true" diffuse="0.6 0.6 0.57"/>\n'
         '    <light pos="34 6 9" dir="0.2 -0.4 -1" directional="true" diffuse="0.35 0.36 0.40"/>\n'
-        f'    <geom type="box" pos="{COURSE_LENGTH:.2f} 0 {FINAL_DECK + 0.9:.2f}" '
+        f'    <geom type="box" pos="{sim.course.length:.2f} 0 {sim.course.final_deck + 0.9:.2f}" '
         f'size="0.04 1.2 0.02" group="2" rgba="1 .95 .2 1"/>', 1)
     return mujoco.MjModel.from_xml_string(xml, _mesh_assets())
 
@@ -84,8 +84,8 @@ def render_course(sim: ParkourSim):
     cam, opt = _camera()
 
     r = mujoco.Renderer(m, height=900, width=1600)
-    for name, look, dist, elev in [("01_overview_iso", COURSE_LENGTH / 2, 44, -22),
-                                   ("02_side_elevation", COURSE_LENGTH / 2, 40, -6),
+    for name, look, dist, elev in [("01_overview_iso", sim.course.length / 2, 44, -22),
+                                   ("02_side_elevation", sim.course.length / 2, 40, -6),
                                    ("03_onramp", 8.0, 14, -14),
                                    ("04_stairs_leap_drop", 20.5, 13, -14),
                                    ("05_hurdle_stepup", 27.5, 13, -14),
@@ -101,7 +101,7 @@ def render_course(sim: ParkourSim):
     n = 300
     for i in range(n):
         t = i / (n - 1)
-        cam.lookat[:] = [-2.0 + t * (COURSE_LENGTH + 4.0), 0, 1.0]
+        cam.lookat[:] = [-2.0 + t * (sim.course.length + 4.0), 0, 1.0]
         cam.distance, cam.elevation = 9.0, -13 - 6 * math.sin(math.pi * t)
         cam.azimuth = 118 + 24 * math.sin(2 * math.pi * t)
         r.update_scene(d, camera=cam, scene_option=opt)
@@ -144,7 +144,7 @@ def film_run(sim: ParkourSim, artifact: str, seed: int, max_steps: int):
             png(r.render(), fd / f"f{fi:05d}.png"); fi += 1
 
     score = instance_score(reason, sim.progress, sim.steps, max_steps)
-    print(f"{artifact}: {reason} at {sim.max_x:.2f} m of {COURSE_LENGTH:.1f} m "
+    print(f"{artifact}: {reason} at {sim.max_x:.2f} m of {sim.course.length:.1f} m "
           f"({100 * sim.progress:.0f}%), score {score:.4f}")
     mp4(fd, OUT / "baseline_run.mp4")
 
@@ -155,12 +155,14 @@ if __name__ == "__main__":
     ap.add_argument("--instance", type=int, default=0)
     ap.add_argument("--of", type=int, default=24, help="suite size the instance is drawn from")
     ap.add_argument("--max-steps", type=int, default=4000)
+    ap.add_argument("--seed", type=int, default=0,
+                    help="round master seed; picks the course. Vary it to eyeball the distribution")
     ap.add_argument("--no-stills", action="store_true")
     a = ap.parse_args()
     OUT.mkdir(exist_ok=True)
-    level, seed = instance_spec(a.instance, a.of)
-    sim = ParkourSim(level, seed)
+    level, inst_seed = instance_spec(a.instance, a.of)
+    sim = ParkourSim(generate_course(a.seed), level, inst_seed)
     if not a.no_stills:
         render_course(sim)
     if a.run:
-        film_run(sim, a.run, seed, a.max_steps)
+        film_run(sim, a.run, inst_seed, a.max_steps)

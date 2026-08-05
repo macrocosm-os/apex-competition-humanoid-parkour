@@ -18,7 +18,7 @@ import time
 import numpy as np
 import onnxruntime as ort
 
-from env import ParkourSim, instance_score, instance_spec
+from env import ParkourSim, generate_course, instance_score, instance_spec
 from env.sim import OBS_DIM, STATE_DIM
 
 
@@ -34,16 +34,18 @@ def rollout(session, sim: ParkourSim, seed: int, max_steps: int):
     return reason
 
 
-def evaluate(path: str, n: int, max_steps: int, verbose: bool = True):
+def evaluate(path: str, n: int, max_steps: int, seed: int = 0, verbose: bool = True):
     opts = ort.SessionOptions()
     opts.intra_op_num_threads = opts.inter_op_num_threads = 1
     session = ort.InferenceSession(path, sess_options=opts, providers=["CPUExecutionProvider"])
 
+    # The round seed picks the course; the instance sweep varies friction across it.
+    course = generate_course(seed)
     rows, t0 = [], time.monotonic()
     for i in range(n):
-        level, seed = instance_spec(i, n)
-        sim = ParkourSim(level, seed)
-        reason = rollout(session, sim, seed, max_steps)
+        level, inst_seed = instance_spec(i, n)
+        sim = ParkourSim(course, level, inst_seed)
+        reason = rollout(session, sim, inst_seed, max_steps)
         score = instance_score(reason, sim.progress, sim.steps, max_steps)
         rows.append({"instance": i, "friction_level": round(level, 4), "terminal_reason": reason,
                      "progress": round(sim.progress, 4), "steps": sim.steps,
@@ -73,10 +75,12 @@ if __name__ == "__main__":
     ap.add_argument("artifact")
     ap.add_argument("-n", type=int, default=20)
     ap.add_argument("--max-steps", type=int, default=4000)
+    ap.add_argument("--seed", type=int, default=0,
+                    help="round master seed; picks the course (the platform injects this as SEED)")
     ap.add_argument("--json")
     ap.add_argument("-q", "--quiet", action="store_true")
     a = ap.parse_args()
-    s = evaluate(a.artifact, a.n, a.max_steps, verbose=not a.quiet)
+    s = evaluate(a.artifact, a.n, a.max_steps, seed=a.seed, verbose=not a.quiet)
     print(json.dumps({k: v for k, v in s.items() if k != "instances"}, indent=2))
     if a.json:
         with open(a.json, "w") as f:
