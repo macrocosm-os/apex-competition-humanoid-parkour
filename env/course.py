@@ -55,19 +55,28 @@ ON_RAMP_RISE, ON_RAMP_RUN, ON_RAMP_DROP = 0.55, 2.0, 0.55
 # much lower, and a segment no embodiment can clear is just a wall.
 DUCK_BAR_Z = 1.05
 
-# Per-instance sliding friction, drawn at random (env/sim.instance_spec). Bands are NARROW on
-# purpose. `friction_level` is uniform on [0, 1] and maps linearly across the band, so a wide band
-# spends most of its draws nowhere near the slippery end: [0.50, 1.25] put the average instance at
-# mu 0.875, and lowering only the floor barely moved a round. Narrowing is what makes every
-# instance a friction problem. 0.55 is smooth indoor tile, 0.35 is wet tile; the slick patch is a
+# Per-instance sliding friction, drawn at random (env/sim.instance_spec). Bands are NARROW and
+# LOW on purpose. `friction_level` is uniform on [0, 1] and maps linearly across the band, so a
+# wide band spends most of its draws nowhere near the slippery end: [0.50, 1.25] put the average
+# instance at mu 0.875, and lowering only the floor barely moved a round. Narrowing is what makes
+# every instance a friction problem. 0.50 is wet concrete, 0.35 is wet tile; the slick patch is a
 # different regime again, down to polished ice.
 #
-# 0.35 is a floor with a reason, not a taste: the on-ramp is atan(0.55/2.0) = 15.38 deg, so
-# walking up it needs mu >= tan(15.38 deg) = 0.275 no matter how good the policy is. Below that
-# the course is not hard, it is impossible -- runs plateau on the ramp at ~3.8 m of 51.14 m.
-# 0.35 keeps ~27% margin over that limit.
-FRICTION_NOMINAL = (0.35, 0.55)
-FRICTION_SLICK = (0.08, 0.15)
+# BOTH ends are pinned by measurement, and the window between them is genuinely small.
+#
+# The floor is bounded from below by the course. The on-ramp is atan(0.55/2.0) = 15.38 deg, so
+# walking up it needs mu >= tan(15.38 deg) = 0.275 no matter how good the policy is -- and a
+# walking biped needs real margin over that static limit, because it has to push off and brake as
+# well as stand. Measured: every band capped below 0.40 yields 0 completions in 120 instances and
+# runs pile up on the ramp at 5-8 m of 51.14 m. Do not take the floor below 0.35.
+#
+# The ceiling is bounded from above by the point of the exercise: it sets how many instances are
+# grippy enough to be easy. Dropping it from 0.55 to 0.50 takes mean mu from 0.442 to 0.419 and
+# the leader's completion rate from 6.7% to 4.2% of instances. 0.48 and below falls off a cliff
+# to under 1%, with whole round seeds yielding no completion at all -- which spikes round-to-round
+# variance rather than measuring skill. 0.50 is the last ceiling that stays robustly completable.
+FRICTION_NOMINAL = (0.35, 0.50)
+FRICTION_SLICK = (0.08, 0.14)
 
 COLOR = {  # by maneuver, so a render is readable at a glance
     "flat": ".55 .57 .60 1", "ramp": ".45 .80 .55 1",

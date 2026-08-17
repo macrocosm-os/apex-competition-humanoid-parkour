@@ -116,6 +116,34 @@ course, over ≥20 seeds, and then to set the takeover threshold (or `num_instan
 The 0.0036 figure above is an extrapolation from a baseline whose variance is bimodal — it either
 clears the on-ramp or does not — so it is an order-of-magnitude guide, not a result.
 
+### The friction band is narrow, and both ends are pinned
+
+µ ∈ [0.35, 0.50] is a small window, and it is small because measurement closes it from both sides.
+`friction_level` is uniform on [0, 1] and maps linearly across the band, so the band *is* the
+difficulty distribution — a wide one spends most draws on grippy surfaces and the seed stops
+mattering. The old [0.50, 1.25] put the average instance at µ 0.875.
+
+**The floor is bounded by the course.** The on-ramp is 15.38°, so nothing walks up it below
+µ = tan(15.38°) = 0.275, and a walking biped needs real margin over that static figure because it
+has to push off and brake as well as stand. Measured against the leaderboard leader over 120
+instances, *every* band capped below 0.40 returns **zero completions**, with runs piling up on the
+ramp at 5–8 m of 51.14 m. 0.35 is the floor; lower is not harder, it is impossible.
+
+**The ceiling is bounded by variance.** It controls how many instances are easy, so lowering it is
+the real difficulty lever:
+
+| ceiling | mean µ | leader completions / 120 | seeds with a completion |
+|---|---|---|---|
+| 0.55 | 0.442 | 8 (6.7%) | 5 of 5 |
+| **0.50** | **0.419** | **5 (4.2%)** | **4 of 5** |
+| 0.48 | 0.410 | 1 (0.8%) | 1 of 5 |
+| 0.45 | 0.396 | 1 (0.8%) | 1 of 5 |
+
+Below 0.50 it falls off a cliff and whole round seeds return no completion at all. That does not
+make the competition harder in a useful way — it makes the top slot depend on which seed was
+drawn, which is the σ_round problem above made worse. 0.50 is the last ceiling that stays
+robustly completable.
+
 ## Wind
 
 Wind is MuJoCo's own fluid model, not an applied-force hack: `opt.wind` is subtracted from each
