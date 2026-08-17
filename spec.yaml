@@ -1,6 +1,6 @@
 schema: apex.competition.v1
 id: humanoid_parkour
-version: 0.6.0
+version: 0.7.0
 display_name: "Humanoid Parkour"
 kind: solo
 process_type: cpu
@@ -27,10 +27,14 @@ resources:
 # .github/workflows/release.yml). `image` is the PLAYER image (loads + serves the miner's ONNX
 # policy).
 #
-# Pinned from the v0.6.0 release run (Actions run 31824999143). Both digests resolved from ghcr
-# by tag and their signatures verified: signature present, issuer is the GitHub OIDC endpoint,
-# and the cert SAN is this file's `cosign_identity` at refs/tags/v0.6.0, over source f6b1e06.
-# The platform pins by digest and rejects tags.
+# DIGESTS BELOW ARE STALE: they are the v0.6.0 build, kept only so this file stays syncable
+# until the v0.7.0 release run finishes. 0.7.0 changes the referee (env/sim.py, env/course.py),
+# and changes it in a way that alters CONTACT PHYSICS rather than just a constant -- a 0.7.0 spec
+# pointing at a 0.6.0 referee would silently evaluate with the friction band still inert, which
+# is the exact defect this release exists to fix and is invisible in the resulting scores.
+# Re-pin both from the run's job summary, resolve them from ghcr by tag, and verify with
+# `cosign verify` (issuer = the GitHub OIDC endpoint, cert SAN = this file's `cosign_identity`
+# at refs/tags/v0.7.0). The platform pins by digest and rejects tags.
 image:
   ref: ghcr.io/macrocosm-os/apex-competition-humanoid-parkour-v2-player
   digest: sha256:89eb38a24ccea07af7d18dc92f19f76bd09f1ba9635d838b78f0bd0a5fab9f65
