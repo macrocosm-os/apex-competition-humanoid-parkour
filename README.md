@@ -55,12 +55,17 @@ carries recurrent state.
 
 | Condition | Range, per instance |
 |---|---|
-| friction | µ ∈ [0.50, 1.25] course-wide, ±8% per-slab jitter (smooth tile → dry concrete) |
-| slick patch | µ ∈ [0.12, 0.30] (wet tile → near-ice) |
-| wind | 0–8 m/s, any direction in the horizontal plane; steady for the episode |
+| friction | µ ∈ [0.35, 0.55] course-wide, ±8% per-slab jitter (wet tile → smooth tile) |
+| slick patch | µ ∈ [0.08, 0.15] (near-ice → wet tile) |
+| wind | 0–14 m/s, any direction in the horizontal plane; steady for the episode |
 
-8 m/s is Beaufort 4 *at the robot*, worth 11.5 N of drag — 3.6% of the G1's weight, pushing
+14 m/s is Beaufort 7 *at the robot*, worth 35.1 N of drag — 11.1% of the G1's weight, pushing
 sideways for the whole run.
+
+The friction band is deliberately narrow. `friction_level` is uniform on [0, 1] and maps linearly
+across it, so a wide band spends most of its draws on grippy surfaces; narrowing it is what makes
+every instance a friction problem. The 0.35 floor is bounded from below by the course itself — the
+on-ramp is 15.38°, so it cannot be walked up at all below µ = tan(15.38°) = 0.275.
 
 ```bash
 python -m env.course          # print the layout

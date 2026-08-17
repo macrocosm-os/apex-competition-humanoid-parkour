@@ -128,12 +128,21 @@ body's linear velocity and quadratic drag follows from `opt.density`, which 0.4.
   the true drag on a G1. Sizing the band against it is therefore conservative in the right
   direction.
 
-The band is 0–8 m/s, uniform, direction uniform over the full circle. That is Beaufort 4 at the
+The band is 0–14 m/s, uniform, direction uniform over the full circle. That is Beaufort 7 at the
 robot, which is stronger weather than it sounds: forecast wind is quoted at 10 m and drops to
-50–70% of that near the ground. It works out to 0.179 N per (m/s)², so **11.5 N at the top of the
-band — 3.6% of the G1's 315 N weight**, needing a ~2 cm shift of the centre of pressure to stand
-against. Sustained, not impulsive: the push-recovery literature's 50–300 N figures are 0.05–0.1 s
-impulses on adult-size humanoids and are not comparable.
+50–70% of that near the ground. It works out to 0.179 N per (m/s)², so **35.1 N at the top of the
+band — 11.1% of the G1's 315 N weight**, needing a ~6.7 cm shift of the centre of pressure to
+stand against. Sustained, not impulsive: the push-recovery literature's 50–300 N figures are
+0.05–0.1 s impulses on adult-size humanoids and are not comparable.
+
+**There is a hard ceiling not far above the band, and it is worth writing down so nobody reaches
+for "just make it windier".** Drag scales as v² against a fixed weight, so the µ needed merely to
+hold station is 0.179 v²/315. At 22 m/s that is 0.275 and the course stops being completable in
+*any* direction, even with maximum grip. Hurricane force (32.7 m/s) needs µ = 0.608 and a 36.5 cm
+centre-of-pressure shift against a ~9 cm foot: it is outside the physics rather than merely hard,
+and no amount of training reaches it. Measured, the last speed that still yields completions is
+20 m/s. Also note `wind_max_ms` caps a *uniform draw* — raising it raises the mean instance, it
+does not make every instance windy.
 
 Wind is not in the observation, for the same reason friction is not: feeling a disturbance and
 adapting is the skill being paid for. It is reported per instance in post-round metadata.
@@ -228,6 +237,33 @@ Two things this surfaced that are worth keeping:
 
 It did **not** save wall time, contrary to the expectation that drove the change: 31 s vs 29.8 s
 for the suite. MuJoCo evidently caches mesh hull construction across compiles within a process.
+
+## Course friction has to out-prioritise the robot's feet
+
+Writing `geom_friction` on the course is necessary but **not sufficient**, and getting this wrong
+is silent. MuJoCo mixes contact parameters from both geoms in a pair, and for friction the mix is
+the element-wise **maximum** whenever the two geoms have equal `geom_priority`. `g1_12dof.xml`
+declares no geom friction at all, so the robot's feet inherit MuJoCo's default of 1.0 — above
+every µ this course draws. `max()` therefore discarded all of it and **every foot contact solved
+at µ = 1.0**, slick patch included.
+
+The effect was total: the whole friction axis did nothing. Reading `data.contact[i].friction`
+during a run showed 1.0 on all 19 course geoms a policy touches, with the slick geom set to 0.02;
+a policy scored identically with the entire course at near-ice as at nominal. Nothing in the score
+looks wrong when this happens, which is what makes it worth a section.
+
+The fix is MuJoCo's documented mechanism for exactly this case: raise `geom_priority` on the
+course side so its contact parameters win outright. It is set once in `_shared_model`, since
+priority is constant per geom and only `geom_friction` varies per instance.
+
+Two consequences to carry forward:
+
+- **The bands had never actually been exercised.** Any figure measured before this — including
+  `baseline_raw_score` and any tuning of the friction range — was measured at µ = 1.0 regardless
+  of what the band said, and has to be re-measured.
+- **Guard it with a contact-level assertion, not a score.** A score check cannot distinguish
+  "friction applied" from "friction ignored but the policy is robust". `tests/test_friction_reaches_contacts.py`
+  asserts the solved contact µ tracks the course geom's µ.
 
 ## Rejected
 

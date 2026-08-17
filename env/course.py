@@ -55,12 +55,19 @@ ON_RAMP_RISE, ON_RAMP_RUN, ON_RAMP_DROP = 0.55, 2.0, 0.55
 # much lower, and a segment no embodiment can clear is just a wall.
 DUCK_BAR_Z = 1.05
 
-# Per-instance sliding friction, drawn at random (env/sim.instance_spec). Bands are set against
-# measured rubber-on-surface values and the range legged-locomotion sim2real work randomises over:
-# 0.50 is smooth indoor tile, 1.25 is dry concrete. The slick patch is a different regime
-# entirely — wet tile down to near-ice.
-FRICTION_NOMINAL = (0.50, 1.25)
-FRICTION_SLICK = (0.12, 0.30)
+# Per-instance sliding friction, drawn at random (env/sim.instance_spec). Bands are NARROW on
+# purpose. `friction_level` is uniform on [0, 1] and maps linearly across the band, so a wide band
+# spends most of its draws nowhere near the slippery end: [0.50, 1.25] put the average instance at
+# mu 0.875, and lowering only the floor barely moved a round. Narrowing is what makes every
+# instance a friction problem. 0.55 is smooth indoor tile, 0.35 is wet tile; the slick patch is a
+# different regime again, down to polished ice.
+#
+# 0.35 is a floor with a reason, not a taste: the on-ramp is atan(0.55/2.0) = 15.38 deg, so
+# walking up it needs mu >= tan(15.38 deg) = 0.275 no matter how good the policy is. Below that
+# the course is not hard, it is impossible -- runs plateau on the ramp at ~3.8 m of 51.14 m.
+# 0.35 keeps ~27% margin over that limit.
+FRICTION_NOMINAL = (0.35, 0.55)
+FRICTION_SLICK = (0.08, 0.15)
 
 COLOR = {  # by maneuver, so a render is readable at a glance
     "flat": ".55 .57 .60 1", "ramp": ".45 .80 .55 1",

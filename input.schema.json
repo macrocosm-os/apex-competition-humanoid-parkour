@@ -35,7 +35,7 @@
       "type": "number",
       "minimum": 0,
       "maximum": 20,
-      "description": "Upper bound of the per-instance wind draw, in m/s; speed is uniform on [0, this] and direction is uniform over the full circle. Default 8.0 (env/sim.WIND_MAX_MS) is Beaufort 4 at the robot, worth 3.6% of body weight in drag. 0 disables wind. Tunable without a release, but it moves baseline_raw_score."
+      "description": "Upper bound of the per-instance wind draw, in m/s; speed is uniform on [0, this] and direction is uniform over the full circle. Default 14.0 (env/sim.WIND_MAX_MS) is Beaufort 7 at the robot, worth 11.1% of body weight in drag. 0 disables wind. Note this is a CAP on a uniform draw, not a setting: raising it raises the mean instance, it does not make every instance windy. Do not raise it above 20 — drag scales as v^2 and nothing completes the course at 22 m/s in any direction, even with maximum grip. Tunable without a release, but it moves baseline_raw_score."
     },
     "record_history": {
       "type": "boolean",
