@@ -29,12 +29,11 @@ resources:
 #
 # DIGESTS BELOW ARE STALE: they are the v0.6.0 build, kept only so this file stays syncable
 # until the v0.7.0 release run finishes. 0.7.0 changes the referee (env/sim.py, env/course.py),
-# and changes it in a way that alters CONTACT PHYSICS rather than just a constant -- a 0.7.0 spec
-# pointing at a 0.6.0 referee would silently evaluate with the friction band still inert, which
-# is the exact defect this release exists to fix and is invisible in the resulting scores.
-# Re-pin both from the run's job summary, resolve them from ghcr by tag, and verify with
-# `cosign verify` (issuer = the GitHub OIDC endpoint, cert SAN = this file's `cosign_identity`
-# at refs/tags/v0.7.0). The platform pins by digest and rejects tags.
+# and changes CONTACT PHYSICS rather than just a constant -- a 0.7.0 spec pointing at a 0.6.0
+# referee would evaluate on different physics from the one this version describes, and the scores
+# would not show it. Re-pin both from the run's job summary, resolve them from ghcr by tag, and
+# verify with `cosign verify` (issuer = the GitHub OIDC endpoint, cert SAN = this file's
+# `cosign_identity` at refs/tags/v0.7.0). The platform pins by digest and rejects tags.
 image:
   ref: ghcr.io/macrocosm-os/apex-competition-humanoid-parkour-v2-player
   digest: sha256:89eb38a24ccea07af7d18dc92f19f76bd09f1ba9635d838b78f0bd0a5fab9f65

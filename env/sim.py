@@ -204,14 +204,18 @@ def _shared_model() -> tuple[mujoco.MjModel, list[int]]:
         _MODEL.opt.density = AIR_DENSITY
         n = sum(len(s.boxes) for s in SEGMENTS)
         _COURSE_GEOMS.extend(_MODEL.geom(f"{GEOM_PREFIX}{i}").id for i in range(n))
-        # Make the course's friction authoritative for foot contacts. MuJoCo mixes contact
-        # parameters from both geoms, and for friction the mix is the element-wise MAXIMUM
-        # whenever the two geoms have equal priority. g1_12dof.xml sets no geom friction, so the
-        # robot's feet sit at MuJoCo's default 1.0 -- above every mu this course draws, which
-        # meant max() discarded all of them and every contact solved at 1.0. The whole friction
-        # band, slick patch included, was inert. Raising priority on the course side makes its
-        # contact parameters win outright, which is MuJoCo's documented mechanism for exactly
-        # this. Constant per geom, so it belongs here; only geom_friction varies per instance.
+        # Make the course's friction authoritative for foot contacts. Writing geom_friction is
+        # necessary but not sufficient: MuJoCo mixes contact parameters from BOTH geoms in a pair,
+        # and for friction the mix is the element-wise MAXIMUM whenever the two have equal
+        # priority. g1_12dof.xml declares no geom friction, so the robot's feet sit at MuJoCo's
+        # default of 1.0 -- above every mu this course draws, so max() would take the foot's value
+        # and the course's band would not reach the solver at all. Raising priority on the course
+        # side makes its contact parameters win outright, which is MuJoCo's documented mechanism
+        # for exactly this case. Guarded by tests/test_friction_reaches_contacts.py, which asserts
+        # on the solved contact friction rather than on a score -- a score cannot distinguish a
+        # band that applied from one that was mixed away.
+        #
+        # Constant per geom, so it belongs here; only geom_friction varies per instance.
         for gid in _COURSE_GEOMS:
             _MODEL.geom_priority[gid] = 1
     return _MODEL, _COURSE_GEOMS

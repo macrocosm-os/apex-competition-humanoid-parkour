@@ -1,14 +1,15 @@
 """The course's sliding friction must reach the solver, not just the model.
 
-Regression guard for a defect that shipped in 0.6.0 and was invisible in every score: MuJoCo mixes
-contact parameters from both geoms in a pair, and for friction the mix is the element-wise MAXIMUM
-when the two geoms have equal `geom_priority`. `g1_12dof.xml` sets no geom friction, so the robot's
-feet sit at MuJoCo's default 1.0 -- above every mu this course draws. Every foot contact therefore
-solved at 1.0 and the whole friction band, slick patch included, did nothing.
+Writing `geom_friction` on the course is necessary but not sufficient. MuJoCo mixes contact
+parameters from both geoms in a pair, and for friction the mix is the element-wise MAXIMUM when
+the two geoms have equal `geom_priority`. `g1_12dof.xml` sets no geom friction, so the robot's
+feet take MuJoCo's default 1.0 -- above every mu this course draws. At equal priority every foot
+contact would therefore solve at 1.0 and the band would never reach the solver, slick patch
+included. `_shared_model` raises the course geoms' priority to prevent that.
 
 These assert at CONTACT level on purpose. A score-based check cannot tell "friction was applied"
-apart from "friction was ignored and the policy happens to be robust", which is exactly how the
-original defect survived.
+apart from "friction was mixed away and the policy happens to be robust", so it is not evidence
+either way.
 
     python -m pytest tests/test_friction_reaches_contacts.py
 """
@@ -80,8 +81,8 @@ def test_solved_contact_friction_matches_the_course():
 def test_contact_friction_is_not_pinned_to_the_default():
     """Lowering the band must move the solved friction, not just the model field.
 
-    The original defect passed a naive "is geom_friction set?" check while every solved contact
-    stayed at MuJoCo's 1.0 default, so this pins the failure mode directly.
+    A naive "is geom_friction set?" check passes even when every solved contact sits at MuJoCo's
+    1.0 default, so this pins the failure mode directly rather than inspecting the model alone.
     """
     nominal, slick = course.FRICTION_NOMINAL, course.FRICTION_SLICK
     seen = []
@@ -100,7 +101,7 @@ def test_contact_friction_is_not_pinned_to_the_default():
     high, low = seen
     assert high != low, (
         f"solved contact friction did not change when the band did ({high} vs {low}) -- "
-        "the course's friction is being discarded somewhere"
+        "the course's friction is not reaching the solver"
     )
     assert low != {1.0}, "solved contact friction is pinned at MuJoCo's 1.0 default"
     assert max(low) < min(high), (

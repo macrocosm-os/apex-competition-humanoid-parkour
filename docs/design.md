@@ -268,30 +268,26 @@ for the suite. MuJoCo evidently caches mesh hull construction across compiles wi
 
 ## Course friction has to out-prioritise the robot's feet
 
-Writing `geom_friction` on the course is necessary but **not sufficient**, and getting this wrong
-is silent. MuJoCo mixes contact parameters from both geoms in a pair, and for friction the mix is
-the element-wise **maximum** whenever the two geoms have equal `geom_priority`. `g1_12dof.xml`
-declares no geom friction at all, so the robot's feet inherit MuJoCo's default of 1.0 — above
-every µ this course draws. `max()` therefore discarded all of it and **every foot contact solved
-at µ = 1.0**, slick patch included.
+Writing `geom_friction` on the course is necessary but **not sufficient**. MuJoCo mixes contact
+parameters from both geoms in a pair, and for friction the mix is the element-wise **maximum**
+whenever the two geoms have equal `geom_priority`. `g1_12dof.xml` declares no geom friction at
+all, so the robot's feet take MuJoCo's default of 1.0 — above every µ this course draws. At equal
+priority `max()` therefore returns the foot's value on every contact, and the course's band never
+reaches the solver.
 
-The effect was total: the whole friction axis did nothing. Reading `data.contact[i].friction`
-during a run showed 1.0 on all 19 course geoms a policy touches, with the slick geom set to 0.02;
-a policy scored identically with the entire course at near-ice as at nominal. Nothing in the score
-looks wrong when this happens, which is what makes it worth a section.
-
-The fix is MuJoCo's documented mechanism for exactly this case: raise `geom_priority` on the
-course side so its contact parameters win outright. It is set once in `_shared_model`, since
+So the course geoms carry `geom_priority = 1`, MuJoCo's documented mechanism for this case: the
+higher-priority geom's contact parameters win outright. It is set once in `_shared_model`, since
 priority is constant per geom and only `geom_friction` varies per instance.
 
-Two consequences to carry forward:
+Two properties worth keeping in mind when changing anything here:
 
-- **The bands had never actually been exercised.** Any figure measured before this — including
-  `baseline_raw_score` and any tuning of the friction range — was measured at µ = 1.0 regardless
-  of what the band said, and has to be re-measured.
-- **Guard it with a contact-level assertion, not a score.** A score check cannot distinguish
-  "friction applied" from "friction ignored but the policy is robust". `tests/test_friction_reaches_contacts.py`
-  asserts the solved contact µ tracks the course geom's µ.
+- **Both sides of a contact matter.** Lowering a course µ does nothing on its own if the other
+  geom in the pair sits higher at equal priority. Any future surface — a new segment, a moving
+  obstacle, a different robot model — needs the same treatment.
+- **Assert on contacts, not on scores.** A score cannot distinguish "the band applied" from "the
+  band was mixed away but the policy is robust", so a score-level check is not evidence either
+  way. `tests/test_friction_reaches_contacts.py` asserts the solved contact µ tracks the course
+  geom's µ, and that lowering the band moves it.
 
 ## Rejected
 
