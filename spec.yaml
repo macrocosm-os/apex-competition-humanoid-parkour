@@ -27,16 +27,13 @@ resources:
 # .github/workflows/release.yml). `image` is the PLAYER image (loads + serves the miner's ONNX
 # policy).
 #
-# DIGESTS BELOW ARE STALE: they are the v0.6.0 build, kept only so this file stays syncable
-# until the v0.7.0 release run finishes. 0.7.0 changes the referee (env/sim.py, env/course.py),
-# and changes CONTACT PHYSICS rather than just a constant -- a 0.7.0 spec pointing at a 0.6.0
-# referee would evaluate on different physics from the one this version describes, and the scores
-# would not show it. Re-pin both from the run's job summary, resolve them from ghcr by tag, and
-# verify with `cosign verify` (issuer = the GitHub OIDC endpoint, cert SAN = this file's
-# `cosign_identity` at refs/tags/v0.7.0). The platform pins by digest and rejects tags.
+# Pinned from the v0.7.0 release run (Actions run 32101486302, source 1554255). Both digests were
+# resolved from ghcr by tag and their signatures verified with `cosign verify`: signature present,
+# issuer is the GitHub OIDC endpoint, and the cert SAN matches this file's `cosign_identity` at
+# refs/tags/v0.7.0. The platform pins by digest and rejects tags.
 image:
   ref: ghcr.io/macrocosm-os/apex-competition-humanoid-parkour-v2-player
-  digest: sha256:89eb38a24ccea07af7d18dc92f19f76bd09f1ba9635d838b78f0bd0a5fab9f65
+  digest: sha256:d838e6cae75f95b4f775542c94e47c16b039006616616f9e10efe7e7e92d51e3
 
 # ONNX artifact: the miner submits a policy graph, not code. The player image validates the
 # interface at load time (obs [batch,104] + state_in [batch,256] -> action [batch,12] +
@@ -115,7 +112,7 @@ referee:
   protocol: gym_v1
   image:
     ref: ghcr.io/macrocosm-os/apex-competition-humanoid-parkour-v2-referee
-    digest: sha256:b64b5c530e87cb78770aa43f58509b35b00b6523ea112660867d48deb62dd6b6
+    digest: sha256:32ad8f7c651b51233365ef269000294377cd32d481be2860bc91f2ee02106504
   timeout_s: 900
 
 signature:
