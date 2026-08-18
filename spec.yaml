@@ -84,7 +84,13 @@ defaults:
   # Cost: round 1 goes to anything scoring > 0; self-corrects on the first real walker.
   baseline_raw_score: 0.0
   round_length_in_days: 2
-  submission_reveal_days: 5      # trained policies carry real R&D; protect them
+  # 1 day, down from 5. The reveal delay protects the R&D in a trained policy, and 5 days was
+  # sized for that alone. It also gates how fast the field can learn from what already works,
+  # which matters more now: 0.7.0 made the course materially harder and no published policy
+  # completes it, so a shorter reveal turns each round's best attempt into a starting point
+  # for the next one instead of a 5-day secret. Shorter than round_length_in_days on purpose,
+  # so a round's submissions are visible before the following round closes.
+  submission_reveal_days: 1
   lower_is_better: false
 
 entrypoints:
