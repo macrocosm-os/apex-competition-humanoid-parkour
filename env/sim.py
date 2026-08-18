@@ -96,11 +96,18 @@ GAIT_PERIOD = 0.8
 # Wind, via MuJoCo's inertia-box fluid model: opt.wind is subtracted from each body's linear
 # velocity and quadratic drag follows, so it only bites with opt.density > 0. Air at 20 C.
 # This robot's equivalent-inertia boxes sum to 0.297 m^2 of frontal area, so drag is
-# 0.179 N per (m/s)^2 head-on -- 11.5 N at WIND_MAX_MS, 3.6% of the G1's 315 N weight.
-# WIND_MAX_MS is Beaufort 4 ("moderate breeze") measured AT THE ROBOT, which is stronger
-# weather than it sounds: wind at 1 m is 50-70% of the 10 m figure forecasts quote.
+# 0.179 N per (m/s)^2 head-on -- 35.1 N at WIND_MAX_MS, 11.1% of the G1's 315 N weight.
+# WIND_MAX_MS is Beaufort 7 measured AT THE ROBOT, which is stronger weather than it sounds:
+# wind at 1 m is 50-70% of the 10 m figure forecasts quote.
+#
+# 14 is set below a measured ceiling, not guessed. Drag scales as v^2 against a fixed weight, so
+# the mu needed just to hold station is 0.179 v^2 / 315: at 22 m/s that is 0.275, and nothing
+# completes the course at 22 in any direction even with maximum grip. Hurricane force (32.7 m/s)
+# needs mu 0.608 and a 36.5 cm centre-of-pressure shift against a ~9 cm foot -- it is outside the
+# physics, not merely hard, and no policy can be trained into it. The last speed that still
+# completes is 20; 14 leaves headroom for the friction band to be the binding constraint.
 AIR_DENSITY = 1.204
-WIND_MAX_MS = 8.0
+WIND_MAX_MS = 14.0
 
 
 class InvalidAction(ValueError):
@@ -197,6 +204,20 @@ def _shared_model() -> tuple[mujoco.MjModel, list[int]]:
         _MODEL.opt.density = AIR_DENSITY
         n = sum(len(s.boxes) for s in SEGMENTS)
         _COURSE_GEOMS.extend(_MODEL.geom(f"{GEOM_PREFIX}{i}").id for i in range(n))
+        # Make the course's friction authoritative for foot contacts. Writing geom_friction is
+        # necessary but not sufficient: MuJoCo mixes contact parameters from BOTH geoms in a pair,
+        # and for friction the mix is the element-wise MAXIMUM whenever the two have equal
+        # priority. g1_12dof.xml declares no geom friction, so the robot's feet sit at MuJoCo's
+        # default of 1.0 -- above every mu this course draws, so max() would take the foot's value
+        # and the course's band would not reach the solver at all. Raising priority on the course
+        # side makes its contact parameters win outright, which is MuJoCo's documented mechanism
+        # for exactly this case. Guarded by tests/test_friction_reaches_contacts.py, which asserts
+        # on the solved contact friction rather than on a score -- a score cannot distinguish a
+        # band that applied from one that was mixed away.
+        #
+        # Constant per geom, so it belongs here; only geom_friction varies per instance.
+        for gid in _COURSE_GEOMS:
+            _MODEL.geom_priority[gid] = 1
     return _MODEL, _COURSE_GEOMS
 
 

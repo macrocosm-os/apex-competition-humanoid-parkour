@@ -116,6 +116,34 @@ course, over ≥20 seeds, and then to set the takeover threshold (or `num_instan
 The 0.0036 figure above is an extrapolation from a baseline whose variance is bimodal — it either
 clears the on-ramp or does not — so it is an order-of-magnitude guide, not a result.
 
+### The friction band is narrow, and both ends are pinned
+
+µ ∈ [0.35, 0.50] is a small window, and it is small because measurement closes it from both sides.
+`friction_level` is uniform on [0, 1] and maps linearly across the band, so the band *is* the
+difficulty distribution — a wide one spends most draws on grippy surfaces and the seed stops
+mattering. The old [0.50, 1.25] put the average instance at µ 0.875.
+
+**The floor is bounded by the course.** The on-ramp is 15.38°, so nothing walks up it below
+µ = tan(15.38°) = 0.275, and a walking biped needs real margin over that static figure because it
+has to push off and brake as well as stand. Measured against the leaderboard leader over 120
+instances, *every* band capped below 0.40 returns **zero completions**, with runs piling up on the
+ramp at 5–8 m of 51.14 m. 0.35 is the floor; lower is not harder, it is impossible.
+
+**The ceiling is bounded by variance.** It controls how many instances are easy, so lowering it is
+the real difficulty lever:
+
+| ceiling | mean µ | leader completions / 120 | seeds with a completion |
+|---|---|---|---|
+| 0.55 | 0.442 | 8 (6.7%) | 5 of 5 |
+| **0.50** | **0.419** | **5 (4.2%)** | **4 of 5** |
+| 0.48 | 0.410 | 1 (0.8%) | 1 of 5 |
+| 0.45 | 0.396 | 1 (0.8%) | 1 of 5 |
+
+Below 0.50 it falls off a cliff and whole round seeds return no completion at all. That does not
+make the competition harder in a useful way — it makes the top slot depend on which seed was
+drawn, which is the σ_round problem above made worse. 0.50 is the last ceiling that stays
+robustly completable.
+
 ## Wind
 
 Wind is MuJoCo's own fluid model, not an applied-force hack: `opt.wind` is subtracted from each
@@ -128,12 +156,21 @@ body's linear velocity and quadratic drag follows from `opt.density`, which 0.4.
   the true drag on a G1. Sizing the band against it is therefore conservative in the right
   direction.
 
-The band is 0–8 m/s, uniform, direction uniform over the full circle. That is Beaufort 4 at the
+The band is 0–14 m/s, uniform, direction uniform over the full circle. That is Beaufort 7 at the
 robot, which is stronger weather than it sounds: forecast wind is quoted at 10 m and drops to
-50–70% of that near the ground. It works out to 0.179 N per (m/s)², so **11.5 N at the top of the
-band — 3.6% of the G1's 315 N weight**, needing a ~2 cm shift of the centre of pressure to stand
-against. Sustained, not impulsive: the push-recovery literature's 50–300 N figures are 0.05–0.1 s
-impulses on adult-size humanoids and are not comparable.
+50–70% of that near the ground. It works out to 0.179 N per (m/s)², so **35.1 N at the top of the
+band — 11.1% of the G1's 315 N weight**, needing a ~6.7 cm shift of the centre of pressure to
+stand against. Sustained, not impulsive: the push-recovery literature's 50–300 N figures are
+0.05–0.1 s impulses on adult-size humanoids and are not comparable.
+
+**There is a hard ceiling not far above the band, and it is worth writing down so nobody reaches
+for "just make it windier".** Drag scales as v² against a fixed weight, so the µ needed merely to
+hold station is 0.179 v²/315. At 22 m/s that is 0.275 and the course stops being completable in
+*any* direction, even with maximum grip. Hurricane force (32.7 m/s) needs µ = 0.608 and a 36.5 cm
+centre-of-pressure shift against a ~9 cm foot: it is outside the physics rather than merely hard,
+and no amount of training reaches it. Measured, the last speed that still yields completions is
+20 m/s. Also note `wind_max_ms` caps a *uniform draw* — raising it raises the mean instance, it
+does not make every instance windy.
 
 Wind is not in the observation, for the same reason friction is not: feeling a disturbance and
 adapting is the skill being paid for. It is reported per instance in post-round metadata.
@@ -228,6 +265,29 @@ Two things this surfaced that are worth keeping:
 
 It did **not** save wall time, contrary to the expectation that drove the change: 31 s vs 29.8 s
 for the suite. MuJoCo evidently caches mesh hull construction across compiles within a process.
+
+## Course friction has to out-prioritise the robot's feet
+
+Writing `geom_friction` on the course is necessary but **not sufficient**. MuJoCo mixes contact
+parameters from both geoms in a pair, and for friction the mix is the element-wise **maximum**
+whenever the two geoms have equal `geom_priority`. `g1_12dof.xml` declares no geom friction at
+all, so the robot's feet take MuJoCo's default of 1.0 — above every µ this course draws. At equal
+priority `max()` therefore returns the foot's value on every contact, and the course's band never
+reaches the solver.
+
+So the course geoms carry `geom_priority = 1`, MuJoCo's documented mechanism for this case: the
+higher-priority geom's contact parameters win outright. It is set once in `_shared_model`, since
+priority is constant per geom and only `geom_friction` varies per instance.
+
+Two properties worth keeping in mind when changing anything here:
+
+- **Both sides of a contact matter.** Lowering a course µ does nothing on its own if the other
+  geom in the pair sits higher at equal priority. Any future surface — a new segment, a moving
+  obstacle, a different robot model — needs the same treatment.
+- **Assert on contacts, not on scores.** A score cannot distinguish "the band applied" from "the
+  band was mixed away but the policy is robust", so a score-level check is not evidence either
+  way. `tests/test_friction_reaches_contacts.py` asserts the solved contact µ tracks the course
+  geom's µ, and that lowering the band moves it.
 
 ## Rejected
 

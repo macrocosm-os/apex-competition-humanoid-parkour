@@ -83,7 +83,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
-      - run: python -m pip install --quiet mujoco==3.11.0 numpy==2.3.4 onnxruntime==1.28.0 onnx torch --extra-index-url https://download.pytorch.org/whl/cpu
+      - run: python -m pip install --quiet mujoco==3.11.0 numpy==2.3.4 onnxruntime==1.28.0 onnx torch pytest --extra-index-url https://download.pytorch.org/whl/cpu
+
+      # Contact-level, not score-level, on purpose: a score cannot tell "friction was applied"
+      # apart from "friction was mixed away and the policy is robust", so none of the score gates
+      # below can stand in for this one.
+      - name: Course friction reaches the solver
+        run: PYTHONPATH=. python -m pytest tests/ -q
+
       - name: apex_sdk must NOT be importable in this job
         run: |
           python - <<'PY'
